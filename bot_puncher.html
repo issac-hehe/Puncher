@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bot Puncher: Infinity War</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #2c1515;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: none;
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+        .screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            z-index: 10;
+        }
+        .wave-announcer {
+            position: absolute;
+            top: 30%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0.5);
+            font-size: 5rem;
+            font-weight: 900;
+            color: #ef4444;
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            z-index: 5;
+            text-shadow: 0 0 20px rgba(239, 68, 68, 0.5);
+        }
+        .wave-announcer.show {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1);
+        }
+        #ui-overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+            pointer-events: none;
+            z-index: 5;
+            user-select: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-overlay" style="width: calc(100% - 40px);">
+        <div class="flex justify-between items-end mb-2">
+            <div class="text-4xl font-black text-yellow-400">SCORE: <span id="score">0</span></div>
+            <div class="text-2xl font-bold text-blue-400">WAVE <span id="wave-num">1</span></div>
+            <div class="text-xl font-bold">HP: <span id="hp">100</span>/<span id="max-hp">100</span></div>
+        </div>
+        <div class="w-full bg-slate-800 h-4 rounded border border-slate-600 relative overflow-hidden">
+            <div id="xp-bar" class="absolute top-0 left-0 h-full bg-blue-500 transition-all duration-200" style="width: 0%;"></div>
+        </div>
+        <div class="text-center font-bold text-sm text-blue-300 mt-1">LEVEL <span id="level-display">1</span></div>
+    </div>
+
+    <div id="wave-text" class="wave-announcer">WAVE 1</div>
+
+    <div id="level-up-screen" class="screen hidden" style="background: rgba(15, 23, 42, 0.95);">
+        <h2 class="text-6xl font-black text-blue-400 mb-2">LEVEL UP!</h2>
+        <p class="text-xl mb-8 text-blue-200">Select a new ability</p>
+        <div id="upgrade-choices" class="flex flex-wrap justify-center gap-4 max-w-4xl"></div>
+    </div>
+
+    <div id="start-screen" class="screen" style="background: rgba(20, 10, 10, 0.85);">
+        <h1 class="text-7xl font-black text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-yellow-500 mb-2 tracking-wider text-center">BOT PUNCHER</h1>
+        <p class="text-red-400 text-xl font-bold tracking-widest mb-8">INFINITY WAR</p>
+        <button onclick="startGame()" class="px-8 py-4 bg-red-600 hover:bg-red-500 text-2xl font-black rounded-xl border-b-4 border-red-800 hover:border-red-600 transition-all active:scale-95 shadow-lg shadow-red-900/50">
+            ENTER THE BATTLEFIELD
+        </button>
+        <div class="mt-8 text-sm text-slate-400 max-w-md text-center bg-black/40 p-4 rounded-lg border border-red-900/30">
+            <p class="font-bold text-slate-300 mb-2">HOW TO PLAY:</p>
+            Move with <span class="text-yellow-400 font-bold">Virtual Joystick (Left)</span><br>
+            Aim & Attack with <span class="text-yellow-400 font-bold">Virtual Joystick (Right)</span><br>
+            Defeat bots, grab blue XP gems, and build your magical arsenal!
+        </div>
+    </div>
+
+    <div id="death-screen" class="screen hidden" style="background: rgba(0,0,0,0.9);">
+        <h2 class="text-5xl font-black text-red-600 mb-2 text-center">YOU WERE OVERWHELMED</h2>
+        <p class="text-xl mb-8 text-slate-400">You survived until Wave <span id="final-wave">1</span></p>
+        <button onclick="startGame()" class="px-8 py-4 bg-slate-800 hover:bg-slate-700 text-xl font-bold rounded-xl border border-slate-600 transition-all">
+            TRY AGAIN
+        </button>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        const scoreEl = document.getElementById('score');
+        const waveEl = document.getElementById('wave-num');
+        const hpEl = document.getElementById('hp');
+        const maxHpEl = document.getElementById('max-hp');
+        const waveText = document.getElementById('wave-text');
+        const finalWaveEl = document.getElementById('final-wave');
+        const startScreen = document.getElementById('start-screen');
+        const deathScreen = document.getElementById('death-screen');
+        const levelUpScreen = document.getElementById('level-up-screen');
+        const upgradeChoices = document.getElementById('upgrade-choices');
+        const xpBar = document.getElementById('xp-bar');
+        const levelDisplay = document.getElementById('level-display');
+
+        let gameActive = false;
+        let score = 0;
+        let wave = 1;
+        let enemiesSpawnedInWave = 0;
+        let enemiesToSpawn = 15;
+        let waveInProgress = false;
+        let bossSpawnedThisWave = false;
+
+        let camera = { x: 0, y: 0 };
+
+        let player = {
+            x: 0, y: 0,
+            radius: 20,
+            speed: 4,
+            hp: 100,
+            maxHp: 100,
+            isPunching: false,
+            punchTimer: 0,
+            punchRange: 75,
+            angle: 0,
+            knifeTimer: 0,
+            pistolTimer: 0,
+            shotgunTimer: 0,
+            damage: 1,
+            punchId: 0,
+            punchHitCount: 0,
+            lightningTimer: 0,
+            xp: 0,
+            xpMax: 10,
+            level: 1,
+            pickupRadius: 90
+        };
+
+        const upgradeDefs = [
+            { id: 'potion', name: 'Cosmic Elixir', desc: 'Instantly heals 40 HP' },
+            { id: 'knives', name: 'Magic Daggers', desc: 'Auto-throws magical blades' },
+            { id: 'pistol', name: 'Blaster Pistol', desc: 'Fires fast cosmic bolts forward' },
+            { id: 'shotgun', name: 'Scatter Gun', desc: 'Fires a deadly heavy 3-way burst' },
+            { id: 'speed', name: 'Time Stone Agility', desc: 'Increases movement speed permanently' },
+            { id: 'punch', name: 'Titan Fists', desc: 'Extends punch reach range' },
+            { id: 'vitality', name: 'Godly Core', desc: 'Adds +25 to total Max Health' },
+            { id: 'damage', name: 'Power Stone Buff', desc: 'Adds +1 heavy Punch Damage' },
+            { id: 'lightning', name: 'Cosmic Smite', desc: 'Summons purple magic lightning bolts' },
+            { id: 'aura', name: 'Infinity Aura', desc: 'Orange flames incinerate nearby enemies' }
+        ];
+
+        let upgrades = {};
+        let bots = [];
+        let particles = [];
+        let projectiles = [];
+        let enemyProjectiles = [];
+        let lightningBolts = [];
+        let drops = [];
+        let keys = {};
+        let mouseX = 0;
+        let mouseY = 0;
+
+        // Touch Control Variables
+        let leftStick = { active: false, id: null, originX: 0, originY: 0, x: 0, y: 0, dx: 0, dy: 0, maxDist: 50 };
+        let rightStick = { active: false, id: null, originX: 0, originY: 0, x: 0, y: 0, dx: 0, dy: 0, maxDist: 50 };
+
+        const fistImage = new Image();
+        fistImage.src = 'image_5bf2dd.png';
+
+        function initUpgrades() {
+            upgradeDefs.forEach(u => upgrades[u.id] = { lvl: 0 });
+        }
+
+        function updateXPBar() {
+            const pct = Math.min(100, (player.xp / player.xpMax) * 100);
+            xpBar.style.width = `${pct}%`;
+        }
+
+        function triggerLevelUp() {
+            gameActive = false;
+            player.xp -= player.xpMax;
+            player.level++;
+            // Escalating leveling difficulty curve: Needs more and more points!
+            player.xpMax = Math.floor(player.xpMax * 1.6) + 20;
+            levelDisplay.innerText = player.level;
+            updateXPBar();
+
+            const available = [...upgradeDefs];
+            const choices = [];
+            for(let i = 0; i < 3; i++) {
+                if (available.length === 0) break;
+                const r = Math.floor(Math.random() * available.length);
+                choices.push(available.splice(r, 1)[0]);
+            }
+
+            upgradeChoices.innerHTML = '';
+            choices.forEach(u => {
+                const btn = document.createElement('button');
+                btn.className = 'bg-slate-900 border-2 border-red-700 hover:border-yellow-500 hover:bg-slate-800 transition-all p-6 rounded-xl flex flex-col items-center w-64 text-left cursor-pointer';
+                btn.onclick = () => selectUpgrade(u.id);
+                btn.innerHTML = `
+                    <div class="text-2xl font-black text-yellow-400 mb-2">${u.name}</div>
+                    <div class="text-slate-300 text-sm mb-4 flex-grow">${u.desc}</div>
+                    <div class="text-xs uppercase font-bold tracking-wider text-red-400 bg-red-950/50 px-2 py-1 rounded">Owned Rank: ${upgrades[u.id].lvl}</div>
+                `;
+                upgradeChoices.appendChild(btn);
+            });
+
+            levelUpScreen.classList.remove('hidden');
+        }
+
+        function selectUpgrade(id) {
+            upgrades[id].lvl++;
+            
+            if (id === 'potion') player.hp = Math.min(player.maxHp, player.hp + 40);
+            if (id === 'speed') player.speed += 0.5;
+            if (id === 'punch') player.punchRange += 15;
+            if (id === 'vitality') { player.maxHp += 25; player.hp += 25; }
+            if (id === 'damage') player.damage += 1;
+
+            hpEl.innerText = Math.ceil(player.hp);
+            maxHpEl.innerText = player.maxHp;
+
+            levelUpScreen.classList.add('hidden');
+            gameActive = true;
+            
+            if (player.xp >= player.xpMax) {
+                triggerLevelUp();
+            } else {
+                requestAnimationFrame(gameLoop);
+            }
+        }
+
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        function startGame() {
+            if (gameActive) return; // Prevent double-starting from tap+click
+            score = 0;
+            wave = 1;
+            enemiesSpawnedInWave = 0;
+            enemiesToSpawn = 15; // Start with a manageable horde
+            waveInProgress = true;
+            bossSpawnedThisWave = false;
+            
+            player.hp = 100;
+            player.maxHp = 100;
+            player.speed = 4;
+            player.punchRange = 75;
+            player.knifeTimer = 0;
+            player.pistolTimer = 0;
+            player.shotgunTimer = 0;
+            player.damage = 1;
+            player.punchId = 0;
+            player.punchHitCount = 0;
+            player.lightningTimer = 0;
+            
+            player.xp = 0;
+            player.xpMax = 50; // Higher starting requirement
+            player.level = 1;
+            levelDisplay.innerText = player.level;
+            updateXPBar();
+            
+            initUpgrades();
+            bots = [];
+            particles = [];
+            projectiles = [];
+            enemyProjectiles = [];
+            lightningBolts = [];
+            drops = [];
+            
+            scoreEl.innerText = score;
+            hpEl.innerText = player.hp;
+            maxHpEl.innerText = player.maxHp;
+            waveEl.innerText = wave;
+
+            gameActive = true;
+            startScreen.classList.add('hidden');
+            deathScreen.classList.add('hidden');
+            levelUpScreen.classList.add('hidden');
+            
+            player.x = canvas.width / 2;
+            player.y = canvas.height / 2;
+            camera.x = 0;
+            camera.y = 0;
+            
+            announceWave();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function announceWave() {
+            waveText.innerText = `WAVE ${wave}`;
+            waveText.classList.add('show');
+            waveInProgress = true;
+            setTimeout(() => {
+                waveText.classList.remove('show');
+            }, 2000);
+        }
+
+        function spawnBot() {
+            if (!gameActive || enemiesSpawnedInWave >= enemiesToSpawn) return;
+            
+            // Introduce new enemy types progressively each wave!
+            let typesAvailable = ['basic'];
+            if (wave >= 2) typesAvailable.push('swarm');
+            if (wave >= 3) typesAvailable.push('fast');
+            if (wave >= 4) typesAvailable.push('tank');
+            if (wave >= 5) typesAvailable.push('spinner');
+            if (wave >= 6) typesAvailable.push('teleporter');
+            if (wave >= 7) typesAvailable.push('charger');
+            if (wave >= 8) typesAvailable.push('shooter');
+            if (wave >= 9) typesAvailable.push('sniper');
+            if (wave >= 10) typesAvailable.push('bomber');
+            if (wave >= 11) typesAvailable.push('ghost');
+            if (wave >= 12) typesAvailable.push('giant');
+            if (wave >= 13) typesAvailable.push('juggernaut');
+
+            let type = typesAvailable[Math.floor(Math.random() * typesAvailable.length)];
+
+            if (wave % 5 === 0 && !bossSpawnedThisWave) {
+                type = 'boss';
+                bossSpawnedThisWave = true;
+            }
+
+            let countToSpawn = type === 'swarm' ? 4 : 1;
+
+            for (let i = 0; i < countToSpawn; i++) {
+                let radius = 20;
+                let speed = 1.5 + (wave * 0.1);
+                // Increased base health so they aren't 1-shottable!
+                let hp = 3 + Math.floor(wave / 2); 
+                let color = '#64748b';
+                
+                if (type === 'boss') { radius = 55; speed = 1.1 + (wave * 0.03); hp = 40 + (wave * 15); color = 'rainbow'; }
+                else if (type === 'tank') { radius = 35; speed = 0.9 + (wave * 0.04); hp = 10 + Math.floor(wave / 1.5); color = '#ef4444'; }
+                else if (type === 'fast') { radius = 15; speed = 2.7 + (wave * 0.12); hp = 2 + Math.floor(wave / 4); color = '#eab308'; }
+                else if (type === 'swarm') { radius = 12; speed = 2.2 + (wave * 0.1); hp = 1; color = '#22c55e'; } // Swarms stay at 1 HP
+                else if (type === 'charger') { radius = 22; speed = 1.3 + (wave * 0.05); hp = 4 + Math.floor(wave / 3); color = '#f97316'; }
+                else if (type === 'shooter') { radius = 18; speed = 1.4 + (wave * 0.05); hp = 3 + Math.floor(wave / 4); color = '#a855f7'; }
+                else if (type === 'bomber') { radius = 25; speed = 1.6 + (wave * 0.08); hp = 5 + Math.floor(wave / 3); color = '#1e293b'; }
+                else if (type === 'ghost') { radius = 18; speed = 2.0 + (wave * 0.1); hp = 2 + Math.floor(wave / 5); color = '#06b6d4'; }
+                else if (type === 'juggernaut') { radius = 45; speed = 0.7 + (wave * 0.02); hp = 25 + wave; color = '#451a03'; }
+                // 4 New Enemy Types:
+                else if (type === 'spinner') { radius = 18; speed = 2.0 + (wave * 0.08); hp = 2 + Math.floor(wave / 3); color = '#ec4899'; } // Pink
+                else if (type === 'teleporter') { radius = 16; speed = 1.2 + (wave * 0.05); hp = 2 + Math.floor(wave / 4); color = '#f8fafc'; } // White
+                else if (type === 'sniper') { radius = 18; speed = 1.1 + (wave * 0.05); hp = 2 + Math.floor(wave / 4); color = '#3b82f6'; } // Blue
+                else if (type === 'giant') { radius = 60; speed = 0.5 + (wave * 0.02); hp = 30 + wave; color = '#14532d'; } // Dark Green
+
+                let baseSpeed = speed;
+
+                let spawnAngle = Math.random() * Math.PI * 2;
+                let spawnDist = Math.hypot(canvas.width / 2, canvas.height / 2) + radius + 50;
+                let x = player.x + Math.cos(spawnAngle) * spawnDist + (Math.random() * 40 - 20); 
+                let y = player.y + Math.sin(spawnAngle) * spawnDist + (Math.random() * 40 - 20);
+
+                bots.push({
+                    x, y, radius, speed, baseSpeed, hp, maxHp: hp, type, color, hitFlash: 0, lastPunchId: 0,
+                    dashTimer: Math.random() * 100, shootTimer: Math.random() * 100, teleportTimer: Math.random() * 100
+                });
+                enemiesSpawnedInWave++;
+            }
+        }
+
+        function createExplosion(x, y, color, count = 10) {
+            for (let i = 0; i < count; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = 1 + Math.random() * 4;
+                particles.push({
+                    x, y,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    radius: 2 + Math.random() * 3,
+                    color: color,
+                    life: 1.0
+                });
+            }
+        }
+
+        // Input Listeners
+        window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+        window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+        window.addEventListener('mousemove', e => {
+            mouseX = e.clientX;
+            mouseY = e.clientY;
+        });
+        window.addEventListener('mousedown', (e) => {
+            if (!gameActive || player.isPunching) return;
+            player.angle = Math.atan2((e.clientY + camera.y) - player.y, (e.clientX + camera.x) - player.x);
+            player.isPunching = true;
+            player.punchTimer = 8;
+            player.punchId++;
+            player.punchHitCount = 0;
+        });
+
+        // Touch Listeners
+        canvas.addEventListener('touchstart', e => {
+            if(e.target === canvas) e.preventDefault();
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                const touch = e.changedTouches[i];
+                if (touch.clientX < canvas.width / 2 && !leftStick.active) {
+                    leftStick.active = true;
+                    leftStick.id = touch.identifier;
+                    leftStick.originX = touch.clientX;
+                    leftStick.originY = touch.clientY;
+                    leftStick.x = touch.clientX;
+                    leftStick.y = touch.clientY;
+                    leftStick.dx = 0; leftStick.dy = 0;
+                } else if (touch.clientX >= canvas.width / 2 && !rightStick.active) {
+                    rightStick.active = true;
+                    rightStick.id = touch.identifier;
+                    rightStick.originX = touch.clientX;
+                    rightStick.originY = touch.clientY;
+                    rightStick.x = touch.clientX;
+                    rightStick.y = touch.clientY;
+                    rightStick.dx = 0; rightStick.dy = 0;
+                }
+            }
+        }, { passive: false });
+
+        canvas.addEventListener('touchmove', e => {
+            if(e.target === canvas) e.preventDefault();
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                const touch = e.changedTouches[i];
+                if (leftStick.active && touch.identifier === leftStick.id) {
+                    leftStick.x = touch.clientX;
+                    leftStick.y = touch.clientY;
+                    let dx = leftStick.x - leftStick.originX;
+                    let dy = leftStick.y - leftStick.originY;
+                    let dist = Math.hypot(dx, dy);
+                    if (dist > leftStick.maxDist) {
+                        dx = (dx / dist) * leftStick.maxDist;
+                        dy = (dy / dist) * leftStick.maxDist;
+                    }
+                    leftStick.dx = dx;
+                    leftStick.dy = dy;
+                }
+                if (rightStick.active && touch.identifier === rightStick.id) {
+                    rightStick.x = touch.clientX;
+                    rightStick.y = touch.clientY;
+                    let dx = rightStick.x - rightStick.originX;
+                    let dy = rightStick.y - rightStick.originY;
+                    let dist = Math.hypot(dx, dy);
+                    if (dist > rightStick.maxDist) {
+                        dx = (dx / dist) * rightStick.maxDist;
+                        dy = (dy / dist) * rightStick.maxDist;
+                    }
+                    rightStick.dx = dx;
+                    rightStick.dy = dy;
+                }
+            }
+        }, { passive: false });
+
+        function handleTouchEnd(e) {
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                const touch = e.changedTouches[i];
+                if (leftStick.active && touch.identifier === leftStick.id) {
+                    leftStick.active = false;
+                    leftStick.dx = 0; leftStick.dy = 0;
+                }
+                if (rightStick.active && touch.identifier === rightStick.id) {
+                    rightStick.active = false;
+                    rightStick.dx = 0; rightStick.dy = 0;
+                }
+            }
+        }
+        canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
+        canvas.addEventListener('touchcancel', handleTouchEnd, { passive: false });
+
+        function update() {
+            let mx = 0; let my = 0;
+            
+            if (keys['w'] || keys['arrowup']) my -= 1;
+            if (keys['s'] || keys['arrowdown']) my += 1;
+            if (keys['a'] || keys['arrowleft']) mx -= 1;
+            if (keys['d'] || keys['arrowright']) mx += 1;
+
+            if (leftStick.active) {
+                mx = leftStick.dx / leftStick.maxDist;
+                my = leftStick.dy / leftStick.maxDist;
+            }
+
+            if (mx !== 0 || my !== 0) {
+                const len = Math.sqrt(mx*mx + my*my);
+                const speedMult = leftStick.active ? Math.min(1, Math.hypot(mx, my)) : 1; 
+                const normalizedX = leftStick.active ? mx : (mx / len);
+                const normalizedY = leftStick.active ? my : (my / len);
+                
+                player.x += normalizedX * player.speed * speedMult;
+                player.y += normalizedY * player.speed * speedMult;
+            }
+
+            camera.x = player.x - canvas.width / 2;
+            camera.y = player.y - canvas.height / 2;
+
+            if (rightStick.active) {
+                if ((rightStick.dx !== 0 || rightStick.dy !== 0) && !player.isPunching) {
+                    player.angle = Math.atan2(rightStick.dy, rightStick.dx);
+                }
+                if (!player.isPunching) {
+                    player.isPunching = true;
+                    player.punchTimer = 8;
+                    player.punchId++;
+                    player.punchHitCount = 0;
+                }
+            } else if (mouseX !== 0 && mouseY !== 0 && !player.isPunching) {
+                player.angle = Math.atan2((mouseY + camera.y) - player.y, (mouseX + camera.x) - player.x);
+            }
+
+            if (player.punchTimer > 0) player.punchTimer--;
+            else player.isPunching = false;
+
+            if (upgrades.lightning && upgrades.lightning.lvl > 0) {
+                player.lightningTimer++;
+                const rate = Math.max(25, 110 - (upgrades.lightning.lvl * 15));
+                if (player.lightningTimer >= rate) {
+                    player.lightningTimer = 0;
+                    if (bots.length > 0) {
+                        const target = bots[Math.floor(Math.random() * bots.length)];
+                        target.hp -= (3 + upgrades.lightning.lvl);
+                        target.hitFlash = 5;
+                        lightningBolts.push({x: target.x, y: target.y, life: 15});
+                        createExplosion(target.x, target.y, '#a855f7', 15);
+                    }
+                }
+            }
+
+            if (upgrades.knives.lvl > 0) {
+                player.knifeTimer++;
+                if (player.knifeTimer >= Math.max(20, 70 - upgrades.knives.lvl * 10)) {
+                    player.knifeTimer = 0;
+                    let targetAngle = player.angle;
+                    if (bots.length > 0) {
+                        const nearest = bots.reduce((near, b) => {
+                            const d = Math.hypot(b.x - player.x, b.y - player.y);
+                            return d < near.d ? {b, d} : near;
+                        }, {b: null, d: Infinity}).b;
+                        if (nearest) targetAngle = Math.atan2(nearest.y - player.y, nearest.x - player.x);
+                    }
+                    projectiles.push({
+                        x: player.x, y: player.y,
+                        vx: Math.cos(targetAngle) * 7, vy: Math.sin(targetAngle) * 7,
+                        radius: 5, color: '#38bdf8', type: 'knife', damage: 2, life: 120
+                    });
+                }
+            }
+
+            if (upgrades.pistol.lvl > 0) {
+                player.pistolTimer++;
+                if (player.pistolTimer >= Math.max(15, 50 - upgrades.pistol.lvl * 8)) {
+                    player.pistolTimer = 0;
+                    projectiles.push({
+                        x: player.x, y: player.y,
+                        vx: Math.cos(player.angle) * 10, vy: Math.sin(player.angle) * 10,
+                        radius: 4, color: '#f43f5e', type: 'bullet', damage: 3, life: 90
+                    });
+                }
+            }
+
+            if (upgrades.shotgun.lvl > 0) {
+                player.shotgunTimer++;
+                if (player.shotgunTimer >= Math.max(40, 100 - upgrades.shotgun.lvl * 12)) {
+                    player.shotgunTimer = 0;
+                    const spreads = [-0.2, 0, 0.2];
+                    spreads.forEach(spread => {
+                        projectiles.push({
+                            x: player.x, y: player.y,
+                            vx: Math.cos(player.angle + spread) * 8, vy: Math.sin(player.angle + spread) * 8,
+                            radius: 4, color: '#eab308', type: 'pellet', damage: 2, life: 45
+                        });
+                    });
+                }
+            }
+
+            for (let i = projectiles.length - 1; i >= 0; i--) {
+                const p = projectiles[i];
+                p.x += p.vx; p.y += p.vy;
+                p.life--;
+                if (p.life <= 0) { projectiles.splice(i, 1); continue; }
+
+                for (let j = bots.length - 1; j >= 0; j--) {
+                    const bot = bots[j];
+                    if (Math.hypot(p.x - bot.x, p.y - bot.y) < p.radius + bot.radius) {
+                        bot.hp -= p.damage;
+                        bot.hitFlash = 4;
+                        projectiles.splice(i, 1);
+                        break;
+                    }
+                }
+            }
+
+            for (let i = enemyProjectiles.length - 1; i >= 0; i--) {
+                const ep = enemyProjectiles[i];
+                ep.x += ep.vx; ep.y += ep.vy;
+                ep.life--;
+                if (ep.life <= 0) { enemyProjectiles.splice(i, 1); continue; }
+
+                if (Math.hypot(ep.x - player.x, ep.y - player.y) < ep.radius + player.radius) {
+                    player.hp -= 1.5; 
+                    hpEl.innerText = Math.max(0, Math.ceil(player.hp));
+                    enemyProjectiles.splice(i, 1);
+                    if (player.hp <= 0) endGame();
+                }
+            }
+
+            bots.forEach((bot, index) => {
+                const dx = player.x - bot.x;
+                const dy = player.y - bot.y;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+
+                if (bot.type === 'charger') {
+                    bot.dashTimer++;
+                    if (bot.dashTimer > 120) { bot.speed = bot.baseSpeed * 4; bot.dashTimer = 0; }
+                    else if (bot.dashTimer > 20) { bot.speed = bot.baseSpeed; }
+                } else if (bot.type === 'shooter') {
+                    if (dist < 300) { bot.x -= (dx / dist) * bot.speed * 0.5; bot.y -= (dy / dist) * bot.speed * 0.5; }
+                    bot.shootTimer++;
+                    if (bot.shootTimer > 100 && dist < 600) {
+                        bot.shootTimer = 0;
+                        enemyProjectiles.push({ x: bot.x, y: bot.y, vx: (dx/dist)*6, vy: (dy/dist)*6, radius: 6, color: '#a855f7', life: 100 });
+                    }
+                } else if (bot.type === 'sniper') {
+                    if (dist < 450) { bot.x -= (dx / dist) * bot.speed * 1.5; bot.y -= (dy / dist) * bot.speed * 1.5; } 
+                    bot.shootTimer++;
+                    if (bot.shootTimer > 150 && dist < 800) {
+                        bot.shootTimer = 0;
+                        enemyProjectiles.push({ x: bot.x, y: bot.y, vx: (dx/dist)*12, vy: (dy/dist)*12, radius: 4, color: '#3b82f6', life: 100 });
+                    }
+                } else if (bot.type === 'teleporter') {
+                    bot.teleportTimer++;
+                    if (bot.teleportTimer > 180 && dist > 150) {
+                        bot.teleportTimer = 0;
+                        createExplosion(bot.x, bot.y, '#ffffff', 10);
+                        bot.x += dx * 0.6; 
+                        bot.y += dy * 0.6;
+                        createExplosion(bot.x, bot.y, '#ffffff', 10);
+                    }
+                } else if (bot.type === 'spinner') {
+                    bot.x += Math.cos(Date.now() / 150) * 3;
+                    bot.y += Math.sin(Date.now() / 150) * 3;
+                }
+
+                bot.x += (dx / dist) * bot.speed;
+                bot.y += (dy / dist) * bot.speed;
+                if (bot.hitFlash > 0) bot.hitFlash--;
+
+                if (dist < player.radius + bot.radius) {
+                    let damageToPlayer = 0.3;
+                    if (bot.type === 'tank') damageToPlayer = 0.6;
+                    if (bot.type === 'boss') damageToPlayer = 1.5;
+                    if (bot.type === 'swarm') damageToPlayer = 0.1;
+                    if (bot.type === 'charger') damageToPlayer = 0.8;
+                    if (bot.type === 'juggernaut') damageToPlayer = 1.2;
+                    if (bot.type === 'giant') damageToPlayer = 1.5;
+                    if (bot.type === 'spinner') damageToPlayer = 0.4;
+                    
+                    player.hp -= damageToPlayer;
+                    hpEl.innerText = Math.max(0, Math.ceil(player.hp));
+                    if (player.hp <= 0) endGame();
+                }
+
+                if (upgrades.aura && upgrades.aura.lvl > 0) {
+                    if (dist < 130) {
+                        bot.hp -= 0.04 * upgrades.aura.lvl;
+                        bot.hitFlash = Math.max(bot.hitFlash, 1);
+                        if (Math.random() < 0.04) {
+                            createExplosion(bot.x, bot.y, '#f59e0b', 1);
+                        }
+                    }
+                }
+
+                if (player.isPunching && player.punchTimer > 4 && bot.lastPunchId !== player.punchId && player.punchHitCount < 5) {
+                    const angleToBot = Math.atan2(-dy, -dx);
+                    let angleDiff = Math.abs(player.angle - angleToBot);
+                    if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
+
+                    if (dist < player.punchRange + bot.radius && angleDiff < 0.9) {
+                        bot.hp -= player.damage;
+                        bot.hitFlash = 6;
+                        bot.lastPunchId = player.punchId;
+                        player.punchHitCount++;
+                    }
+                }
+
+                if (bot.hp <= 0) {
+                    if (bot.type === 'bomber') {
+                        createExplosion(bot.x, bot.y, '#ef4444', 30);
+                        if (Math.hypot(player.x - bot.x, player.y - bot.y) < 130) {
+                            player.hp -= 8;
+                            hpEl.innerText = Math.max(0, Math.ceil(player.hp));
+                            if (player.hp <= 0) endGame();
+                        }
+                    }
+
+                    let explosionColor = bot.type === 'boss' ? '#fbbf24' : bot.color;
+                    createExplosion(bot.x, bot.y, explosionColor, bot.type === 'boss' ? 40 : 12);
+                    
+                    // Different XP drops depending on the enemy's strength!
+                    let dropCount = 1;
+                    let dropValue = 1;
+
+                    if (bot.type === 'fast' || bot.type === 'spinner' || bot.type === 'swarm') {
+                        dropCount = 2; dropValue = 1;
+                    } else if (bot.type === 'teleporter' || bot.type === 'ghost' || bot.type === 'charger') {
+                        dropCount = 3; dropValue = 2;
+                    } else if (bot.type === 'shooter' || bot.type === 'sniper' || bot.type === 'bomber') {
+                        dropCount = 4; dropValue = 3;
+                    } else if (bot.type === 'tank' || bot.type === 'giant' || bot.type === 'juggernaut') {
+                        dropCount = 8; dropValue = 5;
+                    } else if (bot.type === 'boss') {
+                        dropCount = 30; dropValue = 10;
+                    }
+                    
+                    for (let i = 0; i < dropCount; i++) {
+                        drops.push({
+                            x: bot.x + (Math.random() - 0.5) * bot.radius,
+                            y: bot.y + (Math.random() - 0.5) * bot.radius,
+                            value: dropValue,
+                            color: '#3b82f6'
+                        });
+                    }
+
+                    bots.splice(index, 1);
+                    
+                    let points = 2;
+                    if (bot.type === 'tank') points = 10;
+                    if (bot.type === 'fast') points = 5;
+                    if (bot.type === 'swarm') points = 1;
+                    if (bot.type === 'charger') points = 6;
+                    if (bot.type === 'shooter') points = 8;
+                    if (bot.type === 'bomber') points = 8;
+                    if (bot.type === 'ghost') points = 7;
+                    if (bot.type === 'juggernaut') points = 25;
+                    if (bot.type === 'giant') points = 20;
+                    if (bot.type === 'sniper') points = 8;
+                    if (bot.type === 'teleporter') points = 7;
+                    if (bot.type === 'spinner') points = 6;
+                    if (bot.type === 'boss') points = 50;
+                    
+                    score += points;
+                    scoreEl.innerText = score;
+                }
+            });
+
+            for (let i = drops.length - 1; i >= 0; i--) {
+                const drop = drops[i];
+                const dx = player.x - drop.x;
+                const dy = player.y - drop.y;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                
+                if (dist < player.pickupRadius) {
+                    drop.x += (dx/dist) * 9;
+                    drop.y += (dy/dist) * 9;
+                }
+
+                if (dist < player.radius + 6) {
+                    player.xp += drop.value;
+                    drops.splice(i, 1);
+                    updateXPBar();
+                    if (player.xp >= player.xpMax && gameActive) {
+                        triggerLevelUp();
+                    }
+                }
+            }
+
+            particles.forEach((p, i) => {
+                p.x += p.vx; p.y += p.vy;
+                p.life -= 0.03;
+                if (p.life <= 0) particles.splice(i, 1);
+            });
+
+            lightningBolts.forEach(b => b.life--);
+            lightningBolts = lightningBolts.filter(b => b.life > 0);
+
+            if (waveInProgress && enemiesSpawnedInWave < enemiesToSpawn) {
+                // Enemies spawn a little faster each wave
+                if (Math.random() < 0.1 + (wave * 0.02)) spawnBot(); 
+            } else if (bots.length === 0) {
+                wave++;
+                enemiesSpawnedInWave = 0;
+                bossSpawnedThisWave = false;
+                enemiesToSpawn = 10 + (wave * 10); // Progressive wave scaling
+                waveEl.innerText = wave;
+                announceWave();
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            ctx.fillStyle = '#2c1515';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.strokeStyle = '#5c2b2b';
+            ctx.lineWidth = 1;
+            let offsetX = -(camera.x % 60);
+            let offsetY = -(camera.y % 60);
+            for(let x=offsetX; x<canvas.width; x+=60) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke(); }
+            for(let y=offsetY; y<canvas.height; y+=60) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke(); }
+
+            ctx.save();
+            ctx.translate(-camera.x, -camera.y);
+
+            if (upgrades.aura && upgrades.aura.lvl > 0) {
+                ctx.fillStyle = `rgba(245, 158, 11, ${0.08 + Math.sin(Date.now() / 140) * 0.04})`;
+                ctx.beginPath();
+                ctx.arc(player.x, player.y, 130, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = `rgba(245, 158, 11, 0.35)`;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+
+            drops.forEach(drop => {
+                ctx.fillStyle = drop.color;
+                ctx.beginPath();
+                ctx.arc(drop.x, drop.y, 4, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = 'rgba(59, 130, 246, 0.35)';
+                ctx.beginPath();
+                ctx.arc(drop.x, drop.y, 9, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            projectiles.forEach(p => {
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            enemyProjectiles.forEach(ep => {
+                ctx.fillStyle = ep.color;
+                ctx.beginPath();
+                ctx.arc(ep.x, ep.y, ep.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+            });
+
+            lightningBolts.forEach(bolt => {
+                ctx.strokeStyle = `rgba(168, 85, 247, ${bolt.life / 15})`;
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.moveTo(bolt.x, 0);
+                
+                let currentY = 0;
+                let currentX = bolt.x;
+                while(currentY < bolt.y) {
+                    currentX += (Math.random() - 0.5) * 45;
+                    currentY += 25 + Math.random() * 35;
+                    ctx.lineTo(currentX, Math.min(currentY, bolt.y));
+                }
+                ctx.stroke();
+                
+                ctx.fillStyle = `rgba(216, 180, 254, ${bolt.life / 15})`;
+                ctx.beginPath();
+                ctx.arc(bolt.x, bolt.y, 22, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            bots.forEach(bot => {
+                ctx.save();
+                if (bot.type === 'ghost') {
+                    ctx.globalAlpha = 0.2 + Math.abs(Math.sin(Date.now() / 300)) * 0.6;
+                }
+
+                if (bot.type === 'rainbow' || bot.color === 'rainbow' || bot.type === 'boss') {
+                    const hue = (Date.now() / 8) % 360;
+                    bot.displayColor = `hsl(${hue}, 100%, 50%)`;
+                } else {
+                    bot.displayColor = bot.color;
+                }
+
+                ctx.fillStyle = bot.hitFlash > 0 ? '#ffffff' : bot.displayColor;
+                ctx.beginPath();
+                ctx.roundRect(bot.x - bot.radius, bot.y - bot.radius, bot.radius * 2, bot.radius * 2, 8);
+                ctx.fill();
+                
+                if (bot.type !== 'swarm') {
+                    const pct = bot.hp / bot.maxHp;
+                    ctx.fillStyle = '#475569';
+                    ctx.fillRect(bot.x - bot.radius, bot.y - bot.radius - 14, bot.radius * 2, 6);
+                    ctx.fillStyle = '#22c55e';
+                    ctx.fillRect(bot.x - bot.radius, bot.y - bot.radius - 14, (bot.radius * 2) * pct, 6);
+                }
+                ctx.restore();
+            });
+
+            particles.forEach(p => {
+                ctx.globalAlpha = p.life;
+                ctx.fillStyle = p.color;
+                ctx.beginPath(); ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2); ctx.fill();
+            });
+            ctx.globalAlpha = 1.0;
+
+            ctx.save();
+            ctx.translate(player.x, player.y);
+            ctx.rotate(player.angle);
+
+            ctx.fillStyle = '#3b82f6';
+            ctx.beginPath();
+            ctx.arc(0, 0, player.radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = '#1d4ed8';
+            ctx.stroke();
+
+            ctx.fillStyle = '#1e3a8a';
+            ctx.beginPath();
+            ctx.arc(player.radius - 6, 0, 5, 0, Math.PI * 2);
+            ctx.fill();
+
+            if (player.isPunching) {
+                const extend = (8 - Math.abs(player.punchTimer - 4)) * 6;
+                if (fistImage.complete && fistImage.naturalWidth !== 0) {
+                    ctx.drawImage(fistImage, player.radius - 5 + extend, -15, 30, 30);
+                } else {
+                    ctx.fillStyle = '#f59e0b';
+                    ctx.beginPath();
+                    ctx.arc(player.radius + 10 + extend, 0, 10, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+            ctx.restore(); 
+            ctx.restore(); 
+
+            ctx.save();
+            ctx.setTransform(1, 0, 0, 1, 0, 0); 
+            
+            if (leftStick.active) {
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+                ctx.beginPath(); ctx.arc(leftStick.originX, leftStick.originY, leftStick.maxDist, 0, Math.PI * 2); ctx.fill();
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+                ctx.lineWidth = 2; ctx.stroke();
+                
+                ctx.fillStyle = 'rgba(59, 130, 246, 0.5)';
+                ctx.beginPath(); ctx.arc(leftStick.originX + leftStick.dx, leftStick.originY + leftStick.dy, 20, 0, Math.PI * 2); ctx.fill();
+            }
+
+            if (rightStick.active) {
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+                ctx.beginPath(); ctx.arc(rightStick.originX, rightStick.originY, rightStick.maxDist, 0, Math.PI * 2); ctx.fill();
+                ctx.strokeStyle = 'rgba(239, 68, 68, 0.3)';
+                ctx.lineWidth = 2; ctx.stroke();
+                
+                ctx.fillStyle = 'rgba(239, 68, 68, 0.5)';
+                ctx.beginPath(); ctx.arc(rightStick.originX + rightStick.dx, rightStick.originY + rightStick.dy, 20, 0, Math.PI * 2); ctx.fill();
+            }
+            ctx.restore();
+        }
+
+        function gameLoop() {
+            if (!gameActive) return;
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function endGame() {
+            gameActive = false;
+            finalWaveEl.innerText = wave;
+            deathScreen.classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>
